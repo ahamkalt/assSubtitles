@@ -10,6 +10,13 @@
     document.querySelector("base")?.getAttribute("href") ?? "/";
   const pluginAssetBase = baseURL + "plugin/" + PLUGIN_ID + "/assets/";
 
+  // Absolute base for URLs passed into the Web Worker — relative paths fail
+  // inside workers loaded from blob: URLs because there is no base to resolve against.
+  function toAbsolute(url) {
+    return new URL(url, window.location.href).href;
+  }
+  const absAssetBase = toAbsolute(pluginAssetBase);
+
   console.log("[AssSubtitles] Plugin loaded. Asset base:", pluginAssetBase);
 
   function getSceneId() {
@@ -161,12 +168,12 @@
 
       const jassubOpts = {
         video: video,
-        subUrl: subUrl,
+        subUrl: toAbsolute(subUrl),
         workerUrl: blobUrl,
-        wasmUrl: pluginAssetBase + "wasm/jassub-worker.wasm",
-        modernWasmUrl: pluginAssetBase + "wasm/jassub-worker-modern.wasm",
+        wasmUrl: absAssetBase + "wasm/jassub-worker.wasm",
+        modernWasmUrl: absAssetBase + "wasm/jassub-worker-modern.wasm",
         availableFonts: {
-          "liberation sans": pluginAssetBase + "default.woff2",
+          "liberation sans": absAssetBase + "default.woff2",
         },
       };
       console.log("[AssSubtitles] Creating JASSUB instance with opts:", jassubOpts);
