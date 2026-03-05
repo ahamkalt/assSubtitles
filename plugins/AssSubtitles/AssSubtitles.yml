@@ -6,6 +6,10 @@ settings:
     displayName: Custom Served Folder prefix
     description: The URL prefix configured in Stash Settings → System → Custom Served Folders that points to your .ass subtitle directory. Default is "subs".
     type: STRING
+  subtitleLanguage:
+    displayName: Subtitle language code
+    description: Language code used in subtitle filenames, e.g. "en" for Scene.en.ass. Leave empty to only match Scene.ass (no language code). Default is "en".
+    type: STRING
 ui:
   requires:
     - CommunityScriptsUILibrary

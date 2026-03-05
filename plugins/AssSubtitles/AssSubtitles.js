@@ -1,6 +1,6 @@
 (async () => {
   const PLUGIN_ID = "AssSubtitles";
-  const defaultSettings = { customSubsPrefix: "subs" };
+  const defaultSettings = { customSubsPrefix: "subs", subtitleLanguage: "en" };
 
   let jassubInstance = null;
   let currentSceneId = null;
@@ -63,7 +63,8 @@
     console.log("[AssSubtitles] Settings:", settings);
 
     const prefix = (settings.customSubsPrefix || "subs").replace(/^\/|\/$/g, "");
-    console.log("[AssSubtitles] Using prefix:", prefix);
+    const lang = (settings.subtitleLanguage ?? "en").trim();
+    console.log("[AssSubtitles] Using prefix:", prefix, "language:", lang || "(none)");
 
     const query = `query FindScene($id: ID!) {
       findScene(id: $id) {
@@ -85,34 +86,40 @@
     console.log("[AssSubtitles] Video file path:", filePath, "→ basename:", baseName);
 
     const encodedPrefix = encodeURIComponent(prefix);
-    const subUrl =
-      baseURL + "custom/" + encodedPrefix + "/" + encodeURIComponent(baseName + ".ass");
-    console.log("[AssSubtitles] Trying .ass URL:", subUrl);
+
+    // Build candidate filenames in priority order:
+    // 1. {basename}.ass          — no language code
+    // 2. {basename}.{lang}.ass   — with language code (e.g. .en.ass)
+    // 3. {basename}.ssa
+    // 4. {basename}.{lang}.ssa
+    const candidates = [baseName + ".ass"];
+    if (lang) candidates.push(baseName + "." + lang + ".ass");
+    candidates.push(baseName + ".ssa");
+    if (lang) candidates.push(baseName + "." + lang + ".ssa");
 
     let resolvedUrl = null;
-    try {
-      const head = await fetch(subUrl, { method: "HEAD" });
-      console.log("[AssSubtitles] HEAD .ass →", head.status, head.statusText);
-      if (head.ok) resolvedUrl = subUrl;
-    } catch (e) {
-      console.log("[AssSubtitles] HEAD .ass failed:", e);
-    }
-
-    if (!resolvedUrl) {
-      const ssaUrl =
-        baseURL + "custom/" + encodedPrefix + "/" + encodeURIComponent(baseName + ".ssa");
-      console.log("[AssSubtitles] Trying .ssa URL:", ssaUrl);
+    for (const filename of candidates) {
+      const url =
+        baseURL + "custom/" + encodedPrefix + "/" + encodeURIComponent(filename);
+      console.log("[AssSubtitles] Trying:", url);
       try {
-        const head = await fetch(ssaUrl, { method: "HEAD" });
-        console.log("[AssSubtitles] HEAD .ssa →", head.status, head.statusText);
-        if (head.ok) resolvedUrl = ssaUrl;
+        const head = await fetch(url, { method: "HEAD" });
+        console.log("[AssSubtitles] HEAD →", head.status, head.statusText, "for", filename);
+        if (head.ok) {
+          resolvedUrl = url;
+          break;
+        }
       } catch (e) {
-        console.log("[AssSubtitles] HEAD .ssa failed:", e);
+        console.log("[AssSubtitles] HEAD failed for", filename, ":", e);
       }
     }
 
     if (!resolvedUrl) {
-      console.log("[AssSubtitles] No subtitle file found. Check custom served folder and filename.");
+      console.log(
+        "[AssSubtitles] No subtitle file found. Tried:",
+        candidates.join(", "),
+        "— check custom served folder setting and filename."
+      );
       return;
     }
 
