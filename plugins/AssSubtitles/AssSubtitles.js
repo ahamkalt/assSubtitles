@@ -136,10 +136,10 @@
     }
 
     console.log("[AssSubtitles] Subtitle found at:", resolvedUrl);
-    await initJassub(resolvedUrl, sceneId);
+    await initJassub(resolvedUrl, sceneId, settings);
   }
 
-  async function initJassub(subUrl, sceneId) {
+  async function initJassub(subUrl, sceneId, settings) {
     if (currentSceneId !== sceneId) {
       console.log("[AssSubtitles] Scene changed before jassub init, aborting.");
       return;
