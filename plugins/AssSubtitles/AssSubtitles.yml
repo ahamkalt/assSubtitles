@@ -1,0 +1,18 @@
+name: AssSubtitles
+description: Renders .ass/.ssa subtitles on the scene player using jassub (libass compiled to WASM). Requires a Custom Served Folder pointing to your subtitle files.
+version: 0.1.0
+settings:
+  customSubsPrefix:
+    displayName: Custom Served Folder prefix
+    description: The URL prefix configured in Stash Settings → System → Custom Served Folders that points to your .ass subtitle directory. Default is "subs".
+    type: STRING
+ui:
+  requires:
+    - CommunityScriptsUILibrary
+  javascript:
+    - AssSubtitles.js
+  assets:
+    /: assets
+  csp:
+    script-src:
+      - "'wasm-unsafe-eval'"
