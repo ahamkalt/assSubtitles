@@ -184,6 +184,33 @@
       await jassubInstance.ready;
       console.log("[AssSubtitles] JASSUB ready. Canvas parent:", jassubInstance._canvasParent);
 
+      // VideoJS stacks its children with z-index; ensure the subtitle canvas
+      // is above the video layer (which has no explicit z-index but is absolute).
+      if (jassubInstance._canvasParent) {
+        jassubInstance._canvasParent.style.zIndex = "5";
+        jassubInstance._canvasParent.style.pointerEvents = "none";
+      }
+
+      // Force an initial resize+render. This is necessary for paused videos
+      // because requestVideoFrameCallback only fires when new frames are presented.
+      try {
+        await jassubInstance.resize(true);
+        console.log("[AssSubtitles] Initial resize done. Canvas size:", {
+          w: jassubInstance._canvas?.width,
+          h: jassubInstance._canvas?.height,
+        });
+      } catch (e) {
+        console.log("[AssSubtitles] Resize error:", e);
+      }
+
+      // Re-resize when the video starts playing or metadata loads — covers the
+      // case where videoWidth was 0 at init time and the ResizeObserver didn't fire.
+      const triggerResize = () => {
+        if (jassubInstance) jassubInstance.resize(true).catch(() => {});
+      };
+      video.addEventListener("loadedmetadata", triggerResize, { once: true });
+      video.addEventListener("playing", triggerResize, { once: true });
+
       addToggleButton(vjsPlayer);
     } catch (err) {
       console.error("[AssSubtitles] Failed to init jassub:", err);
