@@ -65,7 +65,11 @@
     const fileName = filePath.split(/[/\\]/).pop();
     const baseName = fileName.replace(/\.[^.]+$/, "");
 
-    const subUrl = baseURL + "custom/" + prefix + "/" + baseName + ".ass";
+    // Encode path segments so spaces and other special chars in filenames work
+    const encodedPrefix = encodeURIComponent(prefix);
+    const subFilename = baseName + ".ass";
+    const subUrl =
+      baseURL + "custom/" + encodedPrefix + "/" + encodeURIComponent(subFilename);
 
     let subAvailable = false;
     try {
@@ -74,7 +78,9 @@
     } catch (_) {}
 
     if (!subAvailable) {
-      const ssaUrl = baseURL + "custom/" + prefix + "/" + baseName + ".ssa";
+      const ssaFilename = baseName + ".ssa";
+      const ssaUrl =
+        baseURL + "custom/" + encodedPrefix + "/" + encodeURIComponent(ssaFilename);
       try {
         const head = await fetch(ssaUrl, { method: "HEAD" });
         if (head.ok) subAvailable = ssaUrl;
