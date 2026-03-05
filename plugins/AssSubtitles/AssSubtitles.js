@@ -1,6 +1,11 @@
 (async () => {
   const PLUGIN_ID = "AssSubtitles";
-  const defaultSettings = { customSubsPrefix: "subs", subtitleLanguage: "en" };
+  const defaultSettings = {
+    customSubsPrefix: "subs",
+    subtitleLanguage: "en",
+    customFontsPrefix: "",
+    fontFilenames: "",
+  };
 
   let jassubInstance = null;
   let currentSceneId = null;
@@ -166,6 +171,25 @@
 
       const blobUrl = await getWorkerBlobUrl();
 
+      // Build list of extra font URLs from user-configured fonts folder
+      const extraFonts = [];
+      const fontsPrefix = (settings.customFontsPrefix || "").replace(/^\/|\/$/g, "");
+      if (fontsPrefix && settings.fontFilenames) {
+        const encodedFontsPrefix = encodeURIComponent(fontsPrefix);
+        const fileList = settings.fontFilenames
+          .split(",")
+          .map((f) => f.trim())
+          .filter(Boolean);
+        for (const filename of fileList) {
+          extraFonts.push(
+            toAbsolute(
+              baseURL + "custom/" + encodedFontsPrefix + "/" + encodeURIComponent(filename)
+            )
+          );
+        }
+        console.log("[AssSubtitles] Extra fonts to preload:", extraFonts);
+      }
+
       const jassubOpts = {
         video: video,
         subUrl: toAbsolute(subUrl),
@@ -175,6 +199,11 @@
         availableFonts: {
           "liberation sans": absAssetBase + "default.woff2",
         },
+        // 'localandremote': try Local Font Access API first, then Google Fonts by name
+        // 'local': try only locally installed fonts
+        // false: no font querying, rely only on availableFonts/fonts below
+        queryFonts: "localandremote",
+        fonts: extraFonts,
       };
       console.log("[AssSubtitles] Creating JASSUB instance with opts:", jassubOpts);
 
@@ -184,11 +213,26 @@
       await jassubInstance.ready;
       console.log("[AssSubtitles] JASSUB ready. Canvas parent:", jassubInstance._canvasParent);
 
-      // VideoJS stacks its children with z-index; ensure the subtitle canvas
-      // is above the video layer (which has no explicit z-index but is absolute).
-      if (jassubInstance._canvasParent) {
-        jassubInstance._canvasParent.style.zIndex = "5";
-        jassubInstance._canvasParent.style.pointerEvents = "none";
+      const overlay = jassubInstance._canvasParent;
+      if (overlay) {
+        overlay.style.pointerEvents = "none";
+        overlay.style.zIndex = "5";
+
+        // Size and position the overlay to match the video element exactly, so
+        // subtitles sit over the video only and not over the progress bar / controls.
+        function syncOverlayToVideo() {
+          if (!overlay || !video) return;
+          overlay.style.position = "absolute";
+          overlay.style.top = video.offsetTop + "px";
+          overlay.style.left = video.offsetLeft + "px";
+          overlay.style.width = video.offsetWidth + "px";
+          overlay.style.height = video.offsetHeight + "px";
+        }
+        syncOverlayToVideo();
+
+        const overlayRo = new ResizeObserver(() => syncOverlayToVideo());
+        overlayRo.observe(video);
+        video.addEventListener("loadedmetadata", syncOverlayToVideo);
       }
 
       // Force an initial resize+render. This is necessary for paused videos

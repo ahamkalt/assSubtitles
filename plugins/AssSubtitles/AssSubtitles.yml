@@ -10,6 +10,14 @@ settings:
     displayName: Subtitle language code
     description: Language code used in subtitle filenames, e.g. "en" for Scene.en.ass. Leave empty to only match Scene.ass (no language code). Default is "en".
     type: STRING
+  customFontsPrefix:
+    displayName: Custom fonts folder prefix
+    description: Optional. URL prefix of a Custom Served Folder containing font files (.ttf/.otf). Fonts extracted from MKV attachments can be placed here. Leave empty to skip. Example value "fonts".
+    type: STRING
+  fontFilenames:
+    displayName: Font filenames (comma-separated)
+    description: Comma-separated list of font filenames in the custom fonts folder to preload, e.g. "Arial.ttf,MyFont.otf". Only used when Custom fonts folder prefix is set.
+    type: STRING
 ui:
   requires:
     - CommunityScriptsUILibrary
@@ -20,3 +28,6 @@ ui:
   csp:
     script-src:
       - "'wasm-unsafe-eval'"
+    connect-src:
+      - https://fonts.googleapis.com
+      - https://fonts.gstatic.com
