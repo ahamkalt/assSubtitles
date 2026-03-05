@@ -10,6 +10,8 @@
     document.querySelector("base")?.getAttribute("href") ?? "/";
   const pluginAssetBase = baseURL + "plugin/" + PLUGIN_ID + "/assets/";
 
+  console.log("[AssSubtitles] Plugin loaded. Asset base:", pluginAssetBase);
+
   function getSceneId() {
     const match = window.location.pathname.match(/\/scenes\/(\d+)/);
     return match ? match[1] : null;
@@ -27,30 +29,41 @@
 
   async function getWorkerBlobUrl() {
     if (workerBlobUrl) return workerBlobUrl;
-    const resp = await fetch(pluginAssetBase + "worker/worker.bundle.js");
+    const workerUrl = pluginAssetBase + "worker/worker.bundle.js";
+    console.log("[AssSubtitles] Fetching worker from:", workerUrl);
+    const resp = await fetch(workerUrl);
+    if (!resp.ok)
+      throw new Error("Worker fetch failed: " + resp.status + " " + workerUrl);
     const text = await resp.text();
     const blob = new Blob([text], { type: "text/javascript" });
     workerBlobUrl = URL.createObjectURL(blob);
+    console.log("[AssSubtitles] Worker blob URL created:", workerBlobUrl);
     return workerBlobUrl;
   }
 
   async function setup() {
+    console.log("[AssSubtitles] setup() called, pathname:", window.location.pathname);
+
     const sceneId = getSceneId();
-    if (!sceneId) return;
-    if (sceneId === currentSceneId && jassubInstance) return;
+    if (!sceneId) {
+      console.log("[AssSubtitles] No scene ID found in URL, skipping.");
+      return;
+    }
+    if (sceneId === currentSceneId && jassubInstance) {
+      console.log("[AssSubtitles] Same scene already active, skipping.");
+      return;
+    }
 
     await destroyJassub();
     currentSceneId = sceneId;
+    console.log("[AssSubtitles] Setting up for scene ID:", sceneId);
 
-    const settings = {
-      ...defaultSettings,
-      ...(await csLib.getConfiguration(PLUGIN_ID, {})),
-    };
+    const rawSettings = await csLib.getConfiguration(PLUGIN_ID, {});
+    const settings = { ...defaultSettings, ...rawSettings };
+    console.log("[AssSubtitles] Settings:", settings);
 
-    const prefix = (settings.customSubsPrefix || "subs").replace(
-      /^\/|\/$/g,
-      ""
-    );
+    const prefix = (settings.customSubsPrefix || "subs").replace(/^\/|\/$/g, "");
+    console.log("[AssSubtitles] Using prefix:", prefix);
 
     const query = `query FindScene($id: ID!) {
       findScene(id: $id) {
@@ -59,59 +72,87 @@
     }`;
     const result = await csLib.callGQL({ query, variables: { id: sceneId } });
     const files = result?.findScene?.files;
-    if (!files || files.length === 0) return;
+    console.log("[AssSubtitles] Scene files from GraphQL:", files);
+
+    if (!files || files.length === 0) {
+      console.log("[AssSubtitles] No files found for scene, aborting.");
+      return;
+    }
 
     const filePath = files[0].path;
     const fileName = filePath.split(/[/\\]/).pop();
     const baseName = fileName.replace(/\.[^.]+$/, "");
+    console.log("[AssSubtitles] Video file path:", filePath, "→ basename:", baseName);
 
-    // Encode path segments so spaces and other special chars in filenames work
     const encodedPrefix = encodeURIComponent(prefix);
-    const subFilename = baseName + ".ass";
     const subUrl =
-      baseURL + "custom/" + encodedPrefix + "/" + encodeURIComponent(subFilename);
+      baseURL + "custom/" + encodedPrefix + "/" + encodeURIComponent(baseName + ".ass");
+    console.log("[AssSubtitles] Trying .ass URL:", subUrl);
 
-    let subAvailable = false;
+    let resolvedUrl = null;
     try {
       const head = await fetch(subUrl, { method: "HEAD" });
-      subAvailable = head.ok;
-    } catch (_) {}
+      console.log("[AssSubtitles] HEAD .ass →", head.status, head.statusText);
+      if (head.ok) resolvedUrl = subUrl;
+    } catch (e) {
+      console.log("[AssSubtitles] HEAD .ass failed:", e);
+    }
 
-    if (!subAvailable) {
-      const ssaFilename = baseName + ".ssa";
+    if (!resolvedUrl) {
       const ssaUrl =
-        baseURL + "custom/" + encodedPrefix + "/" + encodeURIComponent(ssaFilename);
+        baseURL + "custom/" + encodedPrefix + "/" + encodeURIComponent(baseName + ".ssa");
+      console.log("[AssSubtitles] Trying .ssa URL:", ssaUrl);
       try {
         const head = await fetch(ssaUrl, { method: "HEAD" });
-        if (head.ok) subAvailable = ssaUrl;
-      } catch (_) {}
-
-      if (subAvailable) {
-        await initJassub(subAvailable, sceneId);
+        console.log("[AssSubtitles] HEAD .ssa →", head.status, head.statusText);
+        if (head.ok) resolvedUrl = ssaUrl;
+      } catch (e) {
+        console.log("[AssSubtitles] HEAD .ssa failed:", e);
       }
+    }
+
+    if (!resolvedUrl) {
+      console.log("[AssSubtitles] No subtitle file found. Check custom served folder and filename.");
       return;
     }
 
-    await initJassub(subUrl, sceneId);
+    console.log("[AssSubtitles] Subtitle found at:", resolvedUrl);
+    await initJassub(resolvedUrl, sceneId);
   }
 
   async function initJassub(subUrl, sceneId) {
-    if (currentSceneId !== sceneId) return;
+    if (currentSceneId !== sceneId) {
+      console.log("[AssSubtitles] Scene changed before jassub init, aborting.");
+      return;
+    }
 
     const playerEl = document.getElementById("VideoJsPlayer");
-    if (!playerEl || !playerEl.player) return;
+    if (!playerEl || !playerEl.player) {
+      console.log("[AssSubtitles] VideoJsPlayer element or player not found.");
+      return;
+    }
 
     const vjsPlayer = playerEl.player;
-    const video = vjsPlayer.tech({ IWillNotUseThisInPlugins: true })?.el();
-    if (!video || !(video instanceof HTMLVideoElement)) return;
+
+    // Try multiple methods to get the <video> element
+    let video =
+      vjsPlayer.tech({ IWillNotUseThisInPlugins: true })?.el() ??
+      playerEl.querySelector("video");
+    if (!video || !(video instanceof HTMLVideoElement)) {
+      console.log("[AssSubtitles] Could not find HTMLVideoElement. Tech el:", video);
+      return;
+    }
+    console.log("[AssSubtitles] Got video element:", video);
 
     try {
+      console.log("[AssSubtitles] Importing jassub from:", pluginAssetBase + "jassub.bundle.js");
       const mod = await import(pluginAssetBase + "jassub.bundle.js");
       const JASSUB = mod.default;
+      console.log("[AssSubtitles] jassub imported, JASSUB:", typeof JASSUB);
 
       const blobUrl = await getWorkerBlobUrl();
 
-      jassubInstance = new JASSUB({
+      const jassubOpts = {
         video: video,
         subUrl: subUrl,
         workerUrl: blobUrl,
@@ -120,9 +161,14 @@
         availableFonts: {
           "liberation sans": pluginAssetBase + "default.woff2",
         },
-      });
+      };
+      console.log("[AssSubtitles] Creating JASSUB instance with opts:", jassubOpts);
+
+      jassubInstance = new JASSUB(jassubOpts);
+      console.log("[AssSubtitles] JASSUB instance created, waiting for ready...");
 
       await jassubInstance.ready;
+      console.log("[AssSubtitles] JASSUB ready. Canvas parent:", jassubInstance._canvasParent);
 
       addToggleButton(vjsPlayer);
     } catch (err) {
@@ -133,7 +179,10 @@
 
   function addToggleButton(vjsPlayer) {
     const controlBar = vjsPlayer.controlBar?.el();
-    if (!controlBar) return;
+    if (!controlBar) {
+      console.log("[AssSubtitles] No control bar found, skipping toggle button.");
+      return;
+    }
 
     if (controlBar.querySelector(".ass-toggle-btn")) return;
 
@@ -161,6 +210,7 @@
     } else {
       controlBar.appendChild(btn);
     }
+    console.log("[AssSubtitles] Toggle button added to control bar.");
   }
 
   PluginApi.Event.addEventListener("stash:location", () => {
