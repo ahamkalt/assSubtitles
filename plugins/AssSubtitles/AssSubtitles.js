@@ -181,13 +181,25 @@
           .map((f) => f.trim())
           .filter(Boolean);
         for (const filename of fileList) {
-          extraFonts.push(
-            toAbsolute(
-              baseURL + "custom/" + encodedFontsPrefix + "/" + encodeURIComponent(filename)
-            )
+          const url = toAbsolute(
+            baseURL + "custom/" + encodedFontsPrefix + "/" + encodeURIComponent(filename)
           );
+          extraFonts.push(url);
         }
         console.log("[AssSubtitles] Extra fonts to preload:", extraFonts);
+      }
+
+      // Map specific font family names used in styles to at least one concrete file.
+      // This helps libass find the right face when the ASS script asks for e.g. "Lato".
+      const availableFonts = {
+        "liberation sans": absAssetBase + "default.woff2",
+      };
+      if (extraFonts.length > 0) {
+        // Assume these are Lato variants as in your screenshot; use the first file
+        // as the base family for \"Lato\". libass will still pick bold/italic variants
+        // based on the loaded faces.
+        availableFonts["Lato"] = extraFonts[0];
+        availableFonts["lato"] = extraFonts[0];
       }
 
       const jassubOpts = {
@@ -196,9 +208,7 @@
         workerUrl: blobUrl,
         wasmUrl: absAssetBase + "wasm/jassub-worker.wasm",
         modernWasmUrl: absAssetBase + "wasm/jassub-worker-modern.wasm",
-        availableFonts: {
-          "liberation sans": absAssetBase + "default.woff2",
-        },
+        availableFonts,
         // 'localandremote': try Local Font Access API first, then Google Fonts by name
         // 'local': try only locally installed fonts
         // false: no font querying, rely only on availableFonts/fonts below
@@ -215,8 +225,9 @@
 
       const overlay = jassubInstance._canvasParent;
       if (overlay) {
+        // Let the overlay sit above the video but *below* the Video.js controls.
+        // We avoid setting an explicit z-index so the control bar stays on top.
         overlay.style.pointerEvents = "none";
-        overlay.style.zIndex = "5";
 
         // Size and position the overlay to match the video element exactly, so
         // subtitles sit over the video only and not over the progress bar / controls.
@@ -273,10 +284,10 @@
 
     const btn = document.createElement("button");
     btn.className = "vjs-control vjs-button ass-toggle-btn";
-    btn.title = "Toggle ASS Subtitles";
-    btn.setAttribute("aria-label", "Toggle ASS Subtitles");
+    btn.title = "Toggle subtitles";
+    btn.setAttribute("aria-label", "Toggle subtitles");
     btn.innerHTML =
-      '<span style="font-size:11px;line-height:28px;font-weight:bold;pointer-events:none;">ASS</span>';
+      '<span style="font-size:11px;line-height:28px;font-weight:bold;pointer-events:none;">SUB</span>';
 
     let visible = true;
     btn.addEventListener("click", () => {
