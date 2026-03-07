@@ -36,6 +36,73 @@
     return false;
   }
 
+  function extractAssFontFamilies(assText) {
+    const fonts = new Set();
+    const lines = assText.split(/\r?\n/);
+    let inStyleSection = false;
+    let fontNameIndex = -1;
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+
+      if (/^\[[^\]]+\]$/.test(trimmed)) {
+        inStyleSection = /^\[(V4\+?\s+Styles)\]$/i.test(trimmed);
+        fontNameIndex = -1;
+        continue;
+      }
+
+      if (inStyleSection) {
+        if (/^Format:/i.test(trimmed)) {
+          const fields = trimmed
+            .slice(7)
+            .split(",")
+            .map((f) => f.trim().toLowerCase());
+          fontNameIndex = fields.indexOf("fontname");
+          continue;
+        }
+
+        if (fontNameIndex >= 0 && /^Style:/i.test(trimmed)) {
+          const parts = trimmed
+            .slice(6)
+            .split(",")
+            .map((p) => p.trim());
+          if (fontNameIndex < parts.length && parts[fontNameIndex]) {
+            fonts.add(parts[fontNameIndex]);
+          }
+        }
+      }
+    }
+
+    // Also scan inline override tags like {\fnSome Font Name}
+    for (const match of assText.matchAll(/\\fn([^\\}\r\n]+)/g)) {
+      const name = match[1]?.trim();
+      if (name) fonts.add(name);
+    }
+
+    return [...fonts];
+  }
+
+  async function fetchGoogleFontBinary(family, italic, weight) {
+    const familyParam = encodeURIComponent(family.trim()).replace(/%20/g, "+");
+    const cssUrl =
+      `https://fonts.googleapis.com/css2?family=${familyParam}` +
+      `:ital,wght@${italic ? 1 : 0},${weight}&display=swap`;
+
+    const cssResp = await fetch(cssUrl);
+    if (!cssResp.ok) return null;
+    const css = await cssResp.text();
+
+    const woff2Matches = [...css.matchAll(/url\(([^)]+)\)\s*format\(['"]woff2['"]\)/g)];
+    if (!woff2Matches.length) return null;
+
+    // Google CSS typically puts the latin subset near the end.
+    const fontUrl = woff2Matches[woff2Matches.length - 1][1].replace(/^['"]|['"]$/g, "");
+    const fontResp = await fetch(fontUrl);
+    if (!fontResp.ok) return null;
+    return new Uint8Array(await fontResp.arrayBuffer());
+  }
+
   async function destroyJassub() {
     if (jassubInstance) {
       try {
@@ -178,8 +245,9 @@
 
       const blobUrl = await getWorkerBlobUrl();
 
-      // Option A default: rely on remote/local font lookup (Google + Local Font API).
-      // Keep manual folder-based font loading available as an explicit opt-in.
+      // Option A default: auto-fetch families referenced by ASS from Google Fonts
+      // and inject binary font data directly into libass. Keep manual folder-based
+      // loading available as an explicit opt-in.
       const fontData = [];
       const customAvailableFonts = {};
       let inferredDefaultFont = null;
@@ -278,6 +346,52 @@
       if (currentSceneId !== sceneId) {
         console.log("[AssSubtitles] Scene changed during subtitle fetch, aborting.");
         return;
+      }
+
+      if (!useCustomFontsFolder) {
+        const families = extractAssFontFamilies(subtitleContent);
+        if (families.length) {
+          console.log("[AssSubtitles] ASS font families detected:", families);
+        } else {
+          console.log("[AssSubtitles] No ASS font families detected; using default fallback font.");
+        }
+
+        const variantPlan = [
+          { italic: false, weight: 400 },
+          { italic: false, weight: 700 },
+          { italic: true, weight: 400 },
+          { italic: true, weight: 700 },
+        ];
+
+        for (const family of families) {
+          const key = family.trim().toLowerCase();
+          if (!key) continue;
+          let loadedForFamily = 0;
+
+          await Promise.all(
+            variantPlan.map(async ({ italic, weight }) => {
+              try {
+                const bin = await fetchGoogleFontBinary(family, italic, weight);
+                if (!bin) return;
+                fontData.push(bin);
+                loadedForFamily += 1;
+              } catch (_) {}
+            })
+          );
+
+          if (loadedForFamily > 0) {
+            inferredDefaultFont ||= key;
+            console.log(
+              `[AssSubtitles] Google font loaded for "${family}" variants: ${loadedForFamily}/${variantPlan.length}`
+            );
+          } else {
+            console.log(`[AssSubtitles] Google font unavailable for "${family}" (will fallback).`);
+          }
+        }
+
+        if (fontData.length) {
+          console.log("[AssSubtitles] Total embedded Google font binaries:", fontData.length);
+        }
       }
 
       // Start JASSUB with an empty placeholder track. We'll load the real subtitle
