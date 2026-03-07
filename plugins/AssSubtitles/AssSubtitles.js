@@ -527,10 +527,37 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         video.addEventListener("loadedmetadata", syncOverlayToVideo);
       }
 
+      // Force render resolution to track the displayed video size. If jassub stays
+      // at its default 300x150 internal canvas, subtitles can look too thin/soft
+      // when upscaled by CSS.
+      const forceRenderResolution = () => {
+        if (!jassubInstance || !video) return;
+        const dpr = window.devicePixelRatio || 1;
+        const cssW = Math.max(1, Math.floor(video.offsetWidth));
+        const cssH = Math.max(1, Math.floor(video.offsetHeight));
+        const renderW = Math.max(1, Math.floor(cssW * dpr));
+        const renderH = Math.max(1, Math.floor(cssH * dpr));
+        const top = Math.floor(video.offsetTop);
+        const left = Math.floor(video.offsetLeft);
+        jassubInstance
+          .resize(true, renderW, renderH, top, left)
+          .then(() => {
+            console.log("[AssSubtitles] Forced render resolution:", {
+              cssW,
+              cssH,
+              renderW,
+              renderH,
+              dpr,
+            });
+          })
+          .catch(() => {});
+      };
+
       // Force an initial resize+render. This is necessary for paused videos
       // because requestVideoFrameCallback only fires when new frames are presented.
       try {
         await jassubInstance.resize(true);
+        forceRenderResolution();
         console.log("[AssSubtitles] Initial resize done. Canvas size:", {
           w: jassubInstance._canvas?.width,
           h: jassubInstance._canvas?.height,
@@ -542,10 +569,14 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
       // Re-resize when the video starts playing or metadata loads — covers the
       // case where videoWidth was 0 at init time and the ResizeObserver didn't fire.
       const triggerResize = () => {
-        if (jassubInstance) jassubInstance.resize(true).catch(() => {});
+        if (jassubInstance) {
+          jassubInstance.resize(true).catch(() => {});
+          forceRenderResolution();
+        }
       };
       video.addEventListener("loadedmetadata", triggerResize, { once: true });
       video.addEventListener("playing", triggerResize, { once: true });
+      video.addEventListener("resize", triggerResize);
 
       addToggleButton(vjsPlayer);
     } catch (err) {
