@@ -445,6 +445,13 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         console.log("[AssSubtitles] Fonts added to libass renderer (", fontData.length, "files).");
       }
 
+      // Re-apply default font AFTER font injection so fallback points at a font
+      // that definitely exists in libass's current font DB.
+      if (inferredDefaultFont) {
+        await jassubInstance.renderer.setDefaultFont(inferredDefaultFont);
+        console.log("[AssSubtitles] Default font set to:", inferredDefaultFont);
+      }
+
       if (currentSceneId !== sceneId) {
         console.log("[AssSubtitles] Scene changed during font loading, aborting.");
         return;
@@ -454,6 +461,32 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
       // Lato (and other preloaded faces) when it matches font names in events.
       await jassubInstance.renderer.setTrack(subtitleContent);
       console.log("[AssSubtitles] Subtitle track set after fonts are registered.");
+
+      // Enforce Lato mapping for styles that already request Lato. This avoids
+      // case/normalization mismatches between ASS style names and libass lookup.
+      if (inferredDefaultFont) {
+        const styles = await jassubInstance.renderer.getStyles();
+        let normalizedCount = 0;
+        for (let i = 0; i < styles.length; i++) {
+          const style = styles[i];
+          const family = (style?.FontName || "").trim().toLowerCase();
+          if (family === "lato" && style.FontName !== inferredDefaultFont) {
+            await jassubInstance.renderer.setStyle(
+              {
+                ...style,
+                FontName: inferredDefaultFont,
+              },
+              i
+            );
+            normalizedCount += 1;
+          }
+        }
+        if (normalizedCount > 0) {
+          console.log(
+            `[AssSubtitles] Normalized ${normalizedCount} style(s) to font family "${inferredDefaultFont}".`
+          );
+        }
+      }
 
       const overlay = jassubInstance._canvasParent;
       if (overlay) {
