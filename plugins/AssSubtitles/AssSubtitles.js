@@ -224,9 +224,22 @@
       // Start JASSUB with an empty placeholder track. We'll load the real subtitle
       // after explicitly calling renderer.addFonts() so libass has the font data
       // ready before it parses any events.
+      const minimalAssTrack = `[Script Info]
+Script Type: v4.00+
+PlayResX: 1920
+PlayResY: 1080
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Arial,48,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,0,0,0,0,100,100,0,0,1,2,1,2,20,20,20,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+`;
+
       const jassubOpts = {
         video: video,
-        subContent: "[Script Info]\nScript Type: v4.00+\n\n[Events]\n",
+        subContent: minimalAssTrack,
         workerUrl: blobUrl,
         wasmUrl: absAssetBase + "wasm/jassub-worker.wasm",
         modernWasmUrl: absAssetBase + "wasm/jassub-worker-modern.wasm",
