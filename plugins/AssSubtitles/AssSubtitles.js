@@ -171,35 +171,39 @@
 
       const blobUrl = await getWorkerBlobUrl();
 
-      // Build list of extra font URLs from user-configured fonts folder
-      const extraFonts = [];
-      const fontsPrefix = (settings.customFontsPrefix || "").replace(/^\/|\/$/g, "");
+      // Fetch font files in the main thread (where we can see errors and get
+      // binary data), then pass Uint8Arrays directly to jassub instead of URLs.
+      // This avoids silent failures inside the worker and doesn't rely on the
+      // worker being able to reach your server.
+      const fontData = [];
+      const fontsPrefix = (settings.customFontsPrefix || prefix || "").replace(/^\/|\/$/g, "");
       if (fontsPrefix && settings.fontFilenames) {
         const encodedFontsPrefix = encodeURIComponent(fontsPrefix);
         const fileList = settings.fontFilenames
           .split(",")
           .map((f) => f.trim())
           .filter(Boolean);
-        for (const filename of fileList) {
-          const url = toAbsolute(
-            baseURL + "custom/" + encodedFontsPrefix + "/" + encodeURIComponent(filename)
-          );
-          extraFonts.push(url);
-        }
-        console.log("[AssSubtitles] Extra fonts to preload:", extraFonts);
-      }
-
-      // Map specific font family names used in styles to at least one concrete file.
-      // This helps libass find the right face when the ASS script asks for e.g. "Lato".
-      const availableFonts = {
-        "liberation sans": absAssetBase + "default.woff2",
-      };
-      if (extraFonts.length > 0) {
-        // Assume these are Lato variants as in your screenshot; use the first file
-        // as the base family for \"Lato\". libass will still pick bold/italic variants
-        // based on the loaded faces.
-        availableFonts["Lato"] = extraFonts[0];
-        availableFonts["lato"] = extraFonts[0];
+        console.log("[AssSubtitles] Fetching", fileList.length, "font file(s) from prefix:", fontsPrefix);
+        await Promise.all(
+          fileList.map(async (filename) => {
+            const url = toAbsolute(
+              baseURL + "custom/" + encodedFontsPrefix + "/" + encodeURIComponent(filename)
+            );
+            try {
+              const resp = await fetch(url);
+              if (!resp.ok) {
+                console.warn("[AssSubtitles] Font fetch failed:", resp.status, url);
+                return;
+              }
+              const buf = await resp.arrayBuffer();
+              fontData.push(new Uint8Array(buf));
+              console.log("[AssSubtitles] Font loaded:", filename, `(${buf.byteLength} bytes)`);
+            } catch (e) {
+              console.warn("[AssSubtitles] Font fetch error:", filename, e);
+            }
+          })
+        );
+        console.log("[AssSubtitles] Loaded", fontData.length, "of", fileList.length, "fonts.");
       }
 
       const jassubOpts = {
@@ -208,12 +212,12 @@
         workerUrl: blobUrl,
         wasmUrl: absAssetBase + "wasm/jassub-worker.wasm",
         modernWasmUrl: absAssetBase + "wasm/jassub-worker-modern.wasm",
-        availableFonts,
-        // 'localandremote': try Local Font Access API first, then Google Fonts by name
-        // 'local': try only locally installed fonts
-        // false: no font querying, rely only on availableFonts/fonts below
+        availableFonts: {
+          "liberation sans": absAssetBase + "default.woff2",
+        },
+        // Try locally installed fonts then Google Fonts for any faces not in fontData[].
         queryFonts: "localandremote",
-        fonts: extraFonts,
+        fonts: fontData,
       };
       console.log("[AssSubtitles] Creating JASSUB instance with opts:", jassubOpts);
 

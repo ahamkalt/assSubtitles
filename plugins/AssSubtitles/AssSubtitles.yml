@@ -12,7 +12,7 @@ settings:
     type: STRING
   customFontsPrefix:
     displayName: Custom fonts folder prefix
-    description: Optional. URL prefix of a Custom Served Folder containing font files (.ttf/.otf). Fonts extracted from MKV attachments can be placed here. Leave empty to skip. Example value "fonts".
+    description: Optional. URL prefix of a Custom Served Folder containing font files (.ttf/.otf). Leave empty to use the same folder as subtitles. Example value "fonts".
     type: STRING
   fontFilenames:
     displayName: Font filenames (comma-separated)
