@@ -136,10 +136,10 @@
     }
 
     console.log("[AssSubtitles] Subtitle found at:", resolvedUrl);
-    await initJassub(resolvedUrl, sceneId, settings);
+    await initJassub(resolvedUrl, sceneId, settings, prefix);
   }
 
-  async function initJassub(subUrl, sceneId, settings) {
+  async function initJassub(subUrl, sceneId, settings, prefix) {
     if (currentSceneId !== sceneId) {
       console.log("[AssSubtitles] Scene changed before jassub init, aborting.");
       return;
@@ -171,10 +171,7 @@
 
       const blobUrl = await getWorkerBlobUrl();
 
-      // Fetch font files in the main thread (where we can see errors and get
-      // binary data), then pass Uint8Arrays directly to jassub instead of URLs.
-      // This avoids silent failures inside the worker and doesn't rely on the
-      // worker being able to reach your server.
+      // Fetch font files in the main thread for visibility and to obtain binary data.
       const fontData = [];
       const fontsPrefix = (settings.customFontsPrefix || prefix || "").replace(/^\/|\/$/g, "");
       if (fontsPrefix && settings.fontFilenames) {
@@ -206,26 +203,64 @@
         console.log("[AssSubtitles] Loaded", fontData.length, "of", fileList.length, "fonts.");
       }
 
+      // Fetch the subtitle content here in the main thread so we can set the track
+      // AFTER fonts are registered — fonts passed via the constructor option arrive in
+      // the worker concurrently with track creation, so libass may not see them in time.
+      const absSubUrl = toAbsolute(subUrl);
+      console.log("[AssSubtitles] Fetching subtitle content from:", absSubUrl);
+      const subResp = await fetch(absSubUrl);
+      if (!subResp.ok) {
+        console.warn("[AssSubtitles] Subtitle content fetch failed:", subResp.status);
+        return;
+      }
+      const subtitleContent = await subResp.text();
+      console.log("[AssSubtitles] Subtitle content fetched, length:", subtitleContent.length, "chars");
+
+      if (currentSceneId !== sceneId) {
+        console.log("[AssSubtitles] Scene changed during subtitle fetch, aborting.");
+        return;
+      }
+
+      // Start JASSUB with an empty placeholder track. We'll load the real subtitle
+      // after explicitly calling renderer.addFonts() so libass has the font data
+      // ready before it parses any events.
       const jassubOpts = {
         video: video,
-        subUrl: toAbsolute(subUrl),
+        subContent: "[Script Info]\nScript Type: v4.00+\n\n[Events]\n",
         workerUrl: blobUrl,
         wasmUrl: absAssetBase + "wasm/jassub-worker.wasm",
         modernWasmUrl: absAssetBase + "wasm/jassub-worker-modern.wasm",
         availableFonts: {
           "liberation sans": absAssetBase + "default.woff2",
         },
-        // Try locally installed fonts then Google Fonts for any faces not in fontData[].
         queryFonts: "localandremote",
-        fonts: fontData,
+        fonts: [],
       };
-      console.log("[AssSubtitles] Creating JASSUB instance with opts:", jassubOpts);
+      console.log("[AssSubtitles] Creating JASSUB instance (empty track, fonts added after ready)...");
 
       jassubInstance = new JASSUB(jassubOpts);
       console.log("[AssSubtitles] JASSUB instance created, waiting for ready...");
 
       await jassubInstance.ready;
       console.log("[AssSubtitles] JASSUB ready. Canvas parent:", jassubInstance._canvasParent);
+
+      // Add fonts explicitly NOW, before the subtitle track is set.
+      // renderer.addFonts() resolves only after the worker has called _allocFonts
+      // and reloadFonts(), so libass's font database is fully updated before we proceed.
+      if (fontData.length > 0) {
+        await jassubInstance.renderer.addFonts(fontData);
+        console.log("[AssSubtitles] Fonts added to libass renderer (", fontData.length, "files).");
+      }
+
+      if (currentSceneId !== sceneId) {
+        console.log("[AssSubtitles] Scene changed during font loading, aborting.");
+        return;
+      }
+
+      // Set the real subtitle track — libass now has the font data and will find
+      // Lato (and other preloaded faces) when it matches font names in events.
+      await jassubInstance.renderer.setTrack(subtitleContent);
+      console.log("[AssSubtitles] Subtitle track set after fonts are registered.");
 
       const overlay = jassubInstance._canvasParent;
       if (overlay) {
