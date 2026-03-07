@@ -462,28 +462,44 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
       await jassubInstance.renderer.setTrack(subtitleContent);
       console.log("[AssSubtitles] Subtitle track set after fonts are registered.");
 
-      // Enforce Lato mapping for styles that already request Lato. This avoids
-      // case/normalization mismatches between ASS style names and libass lookup.
+      // Enforce Lato mapping for styles that already request Lato.
+      // Also normalize ASS bold values so "0" maps to regular 400 and true maps
+      // to 700. Some render paths can otherwise resolve to an unexpectedly light face.
       if (inferredDefaultFont) {
         const styles = await jassubInstance.renderer.getStyles();
-        let normalizedCount = 0;
+        let normalizedFamilyCount = 0;
+        let normalizedWeightCount = 0;
         for (let i = 0; i < styles.length; i++) {
           const style = styles[i];
           const family = (style?.FontName || "").trim().toLowerCase();
-          if (family === "lato" && style.FontName !== inferredDefaultFont) {
-            await jassubInstance.renderer.setStyle(
-              {
-                ...style,
-                FontName: inferredDefaultFont,
-              },
-              i
-            );
-            normalizedCount += 1;
+          if (family !== "lato") continue;
+
+          const patch = { ...style };
+          let changed = false;
+
+          if (patch.FontName !== inferredDefaultFont) {
+            patch.FontName = inferredDefaultFont;
+            changed = true;
+            normalizedFamilyCount += 1;
+          }
+
+          // ASS encodes bold as 0/-1 in many files. Convert to explicit weights
+          // for deterministic matching against injected Lato faces.
+          const isBold = patch.Bold === -1 || patch.Bold === true || patch.Bold >= 700;
+          const targetWeight = isBold ? 700 : 400;
+          if (patch.Bold !== targetWeight) {
+            patch.Bold = targetWeight;
+            changed = true;
+            normalizedWeightCount += 1;
+          }
+
+          if (changed) {
+            await jassubInstance.renderer.setStyle(patch, i);
           }
         }
-        if (normalizedCount > 0) {
+        if (normalizedFamilyCount > 0 || normalizedWeightCount > 0) {
           console.log(
-            `[AssSubtitles] Normalized ${normalizedCount} style(s) to font family "${inferredDefaultFont}".`
+            `[AssSubtitles] Normalized Lato styles: family=${normalizedFamilyCount}, weight=${normalizedWeightCount}.`
           );
         }
       }
