@@ -173,6 +173,8 @@
 
       // Fetch font files in the main thread for visibility and to obtain binary data.
       const fontData = [];
+      const customAvailableFonts = {};
+      let inferredDefaultFont = null;
       const fontsPrefix = (settings.customFontsPrefix || prefix || "").replace(/^\/|\/$/g, "");
       if (fontsPrefix && settings.fontFilenames) {
         const encodedFontsPrefix = encodeURIComponent(fontsPrefix);
@@ -186,6 +188,7 @@
             const url = toAbsolute(
               baseURL + "custom/" + encodedFontsPrefix + "/" + encodeURIComponent(filename)
             );
+            const base = filename.replace(/\.[^.]+$/, "").toLowerCase();
             try {
               const resp = await fetch(url);
               if (!resp.ok) {
@@ -195,12 +198,51 @@
               const buf = await resp.arrayBuffer();
               fontData.push(new Uint8Array(buf));
               console.log("[AssSubtitles] Font loaded:", filename, `(${buf.byteLength} bytes)`);
+
+              // jassub's worker looks up availableFonts by exact "fontname" or
+              // "fontname weight". Provide both filename-derived aliases and
+              // common family/weight aliases (e.g. "lato", "lato bold").
+              const normalized = base.replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+              customAvailableFonts[normalized] = url;
+
+              const styleBySuffix = [
+                [" blackitalic", " black italic"],
+                [" black", " black"],
+                [" bolditalic", " bold italic"],
+                [" bold", " bold"],
+                [" italic", " italic"],
+                [" lightitalic", " light italic"],
+                [" light", " light"],
+                [" thinitalic", " thin italic"],
+                [" thin", " thin"],
+                [" regular", " regular"],
+              ];
+
+              for (const [suffix, alias] of styleBySuffix) {
+                if (normalized.endsWith(suffix)) {
+                  const family = normalized.slice(0, -suffix.length).trim();
+                  if (family) {
+                    customAvailableFonts[family + alias] = url;
+                    // Prefer regular face as family default when available.
+                    if (!customAvailableFonts[family] || suffix === " regular") {
+                      customAvailableFonts[family] = url;
+                    }
+                    if (!inferredDefaultFont || suffix === " regular") {
+                      inferredDefaultFont = family;
+                    }
+                  }
+                  break;
+                }
+              }
             } catch (e) {
               console.warn("[AssSubtitles] Font fetch error:", filename, e);
             }
           })
         );
         console.log("[AssSubtitles] Loaded", fontData.length, "of", fileList.length, "fonts.");
+        if (Object.keys(customAvailableFonts).length > 0) {
+          console.log("[AssSubtitles] availableFonts aliases:", Object.keys(customAvailableFonts));
+        }
       }
 
       // Fetch the subtitle content here in the main thread so we can set the track
@@ -245,9 +287,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         modernWasmUrl: absAssetBase + "wasm/jassub-worker-modern.wasm",
         availableFonts: {
           "liberation sans": absAssetBase + "default.woff2",
+          ...customAvailableFonts,
         },
         queryFonts: "localandremote",
         fonts: [],
+        ...(inferredDefaultFont ? { defaultFont: inferredDefaultFont } : {}),
       };
       console.log("[AssSubtitles] Creating JASSUB instance (empty track, fonts added after ready)...");
 
