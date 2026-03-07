@@ -3,6 +3,7 @@
   const defaultSettings = {
     customSubsPrefix: "subs",
     subtitleLanguage: "en",
+    useCustomFontsFolder: false,
     customFontsPrefix: "",
     fontFilenames: "",
   };
@@ -27,6 +28,12 @@
   function getSceneId() {
     const match = window.location.pathname.match(/\/scenes\/(\d+)/);
     return match ? match[1] : null;
+  }
+
+  function asBool(value) {
+    if (typeof value === "boolean") return value;
+    if (typeof value === "string") return value.trim().toLowerCase() === "true";
+    return false;
   }
 
   async function destroyJassub() {
@@ -171,12 +178,14 @@
 
       const blobUrl = await getWorkerBlobUrl();
 
-      // Fetch font files in the main thread for visibility and to obtain binary data.
+      // Option A default: rely on remote/local font lookup (Google + Local Font API).
+      // Keep manual folder-based font loading available as an explicit opt-in.
       const fontData = [];
       const customAvailableFonts = {};
       let inferredDefaultFont = null;
+      const useCustomFontsFolder = asBool(settings.useCustomFontsFolder);
       const fontsPrefix = (settings.customFontsPrefix || prefix || "").replace(/^\/|\/$/g, "");
-      if (fontsPrefix && settings.fontFilenames) {
+      if (useCustomFontsFolder && fontsPrefix && settings.fontFilenames) {
         const encodedFontsPrefix = encodeURIComponent(fontsPrefix);
         const fileList = settings.fontFilenames
           .split(",")
@@ -243,6 +252,14 @@
         if (Object.keys(customAvailableFonts).length > 0) {
           console.log("[AssSubtitles] availableFonts aliases:", Object.keys(customAvailableFonts));
         }
+      } else if (useCustomFontsFolder) {
+        console.log(
+          "[AssSubtitles] Manual font folder mode enabled but no usable prefix/filenames configured."
+        );
+      } else {
+        console.log(
+          "[AssSubtitles] Manual font folder mode disabled. Using queryFonts=localandremote (Google/local)."
+        );
       }
 
       // Fetch the subtitle content here in the main thread so we can set the track

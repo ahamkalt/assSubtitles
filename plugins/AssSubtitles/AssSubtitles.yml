@@ -10,13 +10,17 @@ settings:
     displayName: Subtitle language code
     description: Language code used in subtitle filenames, e.g. "en" for Scene.en.ass. Leave empty to only match Scene.ass (no language code). Default is "en".
     type: STRING
+  useCustomFontsFolder:
+    displayName: Use custom font folder
+    description: Disabled by default. When off, jassub resolves fonts via browser local fonts (when permitted) and Google Fonts for web-safe families like Lato. Enable this only if you want to preload your own .ttf/.otf files from a Custom Served Folder.
+    type: BOOLEAN
   customFontsPrefix:
     displayName: Custom fonts folder prefix
-    description: Optional. URL prefix of a Custom Served Folder containing font files (.ttf/.otf). Leave empty to use the same folder as subtitles. Example value "fonts".
+    description: Used only when "Use custom font folder" is enabled. URL prefix of a Custom Served Folder containing font files (.ttf/.otf). Leave empty to use the same folder as subtitles. Example value "fonts".
     type: STRING
   fontFilenames:
     displayName: Font filenames (comma-separated)
-    description: Comma-separated list of font filenames in the custom fonts folder to preload, e.g. "Arial.ttf,MyFont.otf". Only used when Custom fonts folder prefix is set.
+    description: Used only when "Use custom font folder" is enabled. Comma-separated list of font filenames to preload, e.g. "Arial.ttf,MyFont.otf".
     type: STRING
 ui:
   requires:
