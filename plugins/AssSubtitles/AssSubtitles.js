@@ -83,24 +83,20 @@
     return [...fonts];
   }
 
-  async function fetchGoogleFontBinary(family, italic, weight) {
-    const familyParam = encodeURIComponent(family.trim()).replace(/%20/g, "+");
-    const cssUrl =
-      `https://fonts.googleapis.com/css2?family=${familyParam}` +
-      `:ital,wght@${italic ? 1 : 0},${weight}&display=swap`;
+  async function fetchLatoTtfBinary(italic, weight) {
+    // Option A practical path: known-good TTFs from Google Fonts upstream.
+    // TTF works reliably with libass/freetype in jassub; CSS->woff2 can be flaky.
+    let file = null;
+    if (!italic && weight === 400) file = "Lato-Regular.ttf";
+    else if (!italic && weight === 700) file = "Lato-Bold.ttf";
+    else if (italic && weight === 400) file = "Lato-Italic.ttf";
+    else if (italic && weight === 700) file = "Lato-BoldItalic.ttf";
+    if (!file) return null;
 
-    const cssResp = await fetch(cssUrl);
-    if (!cssResp.ok) return null;
-    const css = await cssResp.text();
-
-    const woff2Matches = [...css.matchAll(/url\(([^)]+)\)\s*format\(['"]woff2['"]\)/g)];
-    if (!woff2Matches.length) return null;
-
-    // Google CSS typically puts the latin subset near the end.
-    const fontUrl = woff2Matches[woff2Matches.length - 1][1].replace(/^['"]|['"]$/g, "");
-    const fontResp = await fetch(fontUrl);
-    if (!fontResp.ok) return null;
-    return new Uint8Array(await fontResp.arrayBuffer());
+    const url = `https://raw.githubusercontent.com/google/fonts/main/ofl/lato/${file}`;
+    const resp = await fetch(url);
+    if (!resp.ok) return null;
+    return new Uint8Array(await resp.arrayBuffer());
   }
 
   async function destroyJassub() {
@@ -366,12 +362,21 @@
         for (const family of families) {
           const key = family.trim().toLowerCase();
           if (!key) continue;
+
+          // Keep Option A focused: auto-download Lato only.
+          // Other families (Segoe UI, custom signs fonts, etc.) fall back unless the
+          // user enables manual font folder mode and supplies those files.
+          if (key !== "lato") {
+            console.log(`[AssSubtitles] Family "${family}" not auto-downloaded in Option A (fallback).`);
+            continue;
+          }
+
           let loadedForFamily = 0;
 
           await Promise.all(
             variantPlan.map(async ({ italic, weight }) => {
               try {
-                const bin = await fetchGoogleFontBinary(family, italic, weight);
+                const bin = await fetchLatoTtfBinary(italic, weight);
                 if (!bin) return;
                 fontData.push(bin);
                 loadedForFamily += 1;
@@ -382,10 +387,10 @@
           if (loadedForFamily > 0) {
             inferredDefaultFont ||= key;
             console.log(
-              `[AssSubtitles] Google font loaded for "${family}" variants: ${loadedForFamily}/${variantPlan.length}`
+              `[AssSubtitles] Lato TTF loaded variants: ${loadedForFamily}/${variantPlan.length}`
             );
           } else {
-            console.log(`[AssSubtitles] Google font unavailable for "${family}" (will fallback).`);
+            console.log(`[AssSubtitles] Lato TTF unavailable (will fallback).`);
           }
         }
 
